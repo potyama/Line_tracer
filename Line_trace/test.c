@@ -69,115 +69,170 @@ void control_proc(void);
 
 int main(void)
 {
-	/* 初期化 */
-	ROMEMU();           /* ROMエミュレーションをON */
+  /* 初期化 */
+  ROMEMU();           /* ROMエミュレーションをON */
+  
+  init_sci2(); /*SCI2を初期化*/
+  
+  /* ここでLEDポート(P9)の初期化を行う */
+  P9DDR = 0x30;
+  
+  /* 割り込みで使用する大域変数の初期化 */
+  disp_time = 0; disp_flag = 1; /* 表示関連 */
+  key_time = 0;                 /* キー入力関連 */
+  ad_time = 0;                  /* A/D変換関連 */
+  control_time = 0;             /* 制御関連 */
+  /* ここまで */
+  
+  adbufdp = 0;         /* A/D変換データバッファポインタの初期化 */
+  lcd_init();          /* LCD表示器の初期化 */
+  ad_init();           /* A/Dの初期化 */
+  timer_init();        /* タイマの初期化 */
+  timer_set(0,TIMER0); /* タイマ0の時間間隔をセット */
+  timer_start(0);      /* タイマ0スタート */
 
-	/* ここでLEDポート(P9)の初期化を行う */
-	P9DDR = 0x30;
-	/* 割り込みで使用する大域変数の初期化 */
-	pwm_time = pwm_count = 0;     /* PWM制御関連 */
-	disp_time = 0; disp_flag = 1; /* 表示関連 */
-	key_time = 0;                 /* キー入力関連 */
-	ad_time = 0;                  /* A/D変換関連 */
-	control_time = 0;             /* 制御関連 */
-	/* ここまで */
-	adbufdp = 0;         /* A/D変換データバッファポインタの初期化 */
-	lcd_init();          /* LCD表示器の初期化 */
-	key_init();          /* キースキャンの初期化 */
-	ad_init();           /* A/Dの初期化 */
-	timer_init();        /* タイマの初期化 */
-	timer_set(0,TIMER0); /* タイマ0の時間間隔をセット */
-	timer_start(0);      /* タイマ0スタート */
-	ENINT();             /* 全割り込み受付可 */
-	redval = 99;
-	greenval = 99; /* 赤・緑LEDの両方を消灯とする */
-	/* ここでLCDに表示する文字列を初期化しておく */
-	int i = 0;
-      lcd_str_upper[1] = "R:";
-      lcd_str_lower[1] = "L:";
-	while (1){ /* 普段はこのループを実行している */
-            
-	  /* ここで disp_flag によってLCDの表示を更新する */
-	if(disp_flag == 1){
-            
+  curve_time=0;
+  turn_time=0;
+  turn_flag=0;
+
+  strcpy(str_upper,"READY");
+  lcd_cursor(0,0);
+  lcd_printstr(str_upper);
+
+  PBDDR=0x0f;
+  PBDR=ST;
+  ad_scan(0,1);
+
+  P6DDR=0x00;
+  while(P6DR & 0x01==0x01);
+  
+  ENINT();             /* 全割り込み受付可 */
+  
+  /* ここでLCDに表示する文字列を初期化しておく */
+  strcpy(str_upper,"L:   ");
+  strcpy(str_lower,"R:   ");
+
+  lcd_cursor(0,0);
+  lcd_printstr(str_upper);
+  lcd_cursor(0,1);
+  lcd_printstr(str_lower);
+  
+  while (1){ /* 普段はこのループを実行している */
+    /* ここで disp_flag によってLCDの表示を更新する */
+    if(disp_flag == 1){
+      str_upper[2]=(scan_l/100)+'0';
+      str_upper[3]=(scan_l/10)%10+'0';
+      str_upper[4]=scan_l%10+'0';
+      str_lower[2]=(scan_r/100)+'0';
+      str_lower[3]=(scan_r/10)%10+'0';
+      str_lower[4]=scan_r%10+'0';
+      
+      lcd_cursor(0,0);
+      lcd_printstr(str_upper);
+      lcd_cursor(0,1);
+      lcd_printstr(str_lower);
+    }
+  }
 }
 
 #pragma interrupt
 void int_imia0(void)
-	   /* タイマ0(GRA) の割り込みハンドラ　　　　　　　　　　　　　　　 */
-	   /* 関数の名前はリンカスクリプトで固定している                   */
-	   /* 関数の直前に割り込みハンドラ指定の #pragama interrupt が必要 */
-	   /* タイマ割り込みによって各処理の呼出しが行われる               */
-	   /*   呼出しの頻度は KEYTIME,ADTIME,PWMTIME,CONTROLTIME で決まる */
-	   /* 全ての処理が終わるまで割り込みはマスクされる                 */
-	   /* 各処理は基本的に割り込み周期内で終わらなければならない       */
 {
-	/* LCD表示の処理 */
-	/* 他の処理を書くときの参考 */
-	disp_time++;
-	if (disp_time >= DISPTIME){
-		disp_flag = 1;
-	  	disp_time = 0;
-		}
+  curve_time++;
+  
+  /* LCD表示の処理 */
+  /* 他の処理を書くときの参考 */
+  disp_time++;
+  if (disp_time >= DISPTIME){
+    disp_flag = 1;
+    disp_time = 0;
+  }
 
-	/* ここにキー処理に分岐するための処理を書く */
-	/* キー処理の中身は全て key.c にある */
-	key_time++;
-	if(key_time >= KEYTIME){
-		key_sense();
-		key_time = 0;
-	}
-	/* ここにPWM処理に分岐するための処理を書く */
-	   pwm_time++;
-	   if(pwm_time == PWMTIME){ 
-	        pwm_proc();
-	        pwm_time =0;
-	   }
-	/* ここにA/D変換開始の処理を直接書く */
-	ad_time++;
-	if(ad_time >= ADTIME){
-		ad_scan(0,1);
-		ad_time = 0;
-	}
-	/* A/D変換の初期化・スタート・ストップの処理関数は ad.c にある */
-	
-	/* ここに制御処理に分岐するための処理を書く */
-	control_time++;
-	if(control_time == CONTROLTIME){
-		control_proc();
-		control_time = 0;
-	}
-	timer_intflag_reset(0); /* 割り込みフラグをクリア */
-	ENINT();                /* CPUを割り込み許可状態に */
+  /* ここにA/D変換開始の処理を直接書く */
+  ad_time++;
+  if(ad_time >= ADTIME){
+    ad_scan(0,1);
+    ad_time = 0;
+  }
+  /* A/D変換の初期化・スタート・ストップの処理関数は ad.c にある */
+  
+  /* ここに制御処理に分岐するための処理を書く */
+  control_time++;
+  if(control_time == CONTROLTIME){
+    control_proc();
+    control_time = 0;
+  }
+
+  if(turn_flag==1){
+    turn_time++;
+    if(turn_time>=TURNTIME){
+      PBDR=ST;
+    }
+    if(turn_time>=CONTROLTIME){
+      turn_time=0;
+      turn_flag=0;
+    }
+  }
+}
+
+  timer_intflag_reset(0); /* 割り込みフラグをクリア */
+  ENINT();                /* CPUを割り込み許可状態に */
+}
+
+#pragma interrupt
+void int_adi(void)
+{
+  ad_stop();
+
+  adbufdp++;
+  adbufdp%=ADBUFSIZE;
+
+  adbuf[1][adbuufdp]=ADDRBH;
+  adbuf[2][adbuufdp]=ADDRCH;
+
+  ENINT();
 }
 
 int ad_read(int ch)
-	   /* A/Dチャネル番号を引数で与えると, 指定チャネルの平均化した値を返す関数 */
-	   /* チャネル番号は，0〜ADCHNUM の範囲 　　　　　　　　　　　             */
-	   /* 戻り値は, 指定チャネルの平均化した値 (チャネル指定エラー時はADCHNONE) */
+   /* A/Dチャネル番号を引数で与えると, 指定チャネルの平均化した値を返す関数 */
+   /* チャネル番号は，0〜ADCHNUM の範囲 　　　　　　　　　　　             */
+   /* 戻り値は, 指定チャネルの平均化した値 (チャネル指定エラー時はADCHNONE) */
 {
-	int i,ad,dp;
-	if ((ch > ADCHNUM) || (ch < 0)) ad = ADCHNONE; /* チャネル範囲のチェック */
-	else {
-	dp = adbufdp-3;
-	ad = 0;
-	for(i = 0;i < ADAVRNUM;i++){
-		if(dp == 0)dp = ADBUFSIZE - 1;
-		if(dp < 0)dp = ADBUFSIZE -1;
-		ad += adbuf[ch][dp];
-		dp--;
-	}
-	  /* ここで指定チャネルのデータをバッファからADAVRNUM個取り出して平均する */
-	  /* データを取り出すときに、バッファの境界に注意すること */
-	  /* 平均した値が戻り値となる */
-	ad /= ADAVRNUM;
-	}
-	return ad; /* データの平均値を返す */
+  int i,ad,dp;
+  if ((ch > ADCHNUM) || (ch < 0)) ad = ADCHNONE; /* チャネル範囲のチェック */
+  else {
+    dp = adbufdp-3;
+    ad = 0;
+
+    if(dp<0)dp+=ADBUFSIZE;
+    
+    for(i = 0;i < ADAVRNUM;i++){
+      if(dp >= ADBUFSIZE)dp %= ADBUFSIZE;
+      ad += adbuf[ch][dp];
+      dp++;
+    }
+    /* ここで指定チャネルのデータをバッファからADAVRNUM個取り出して平均する */
+    /* データを取り出すときに、バッファの境界に注意すること */
+    /* 平均した値が戻り値となる */
+    ad /= ADAVRNUM;
+  }
+  return ad; /* データの平均値を返す */
 }
 
+void control_proc(void)
+{
+  int r = ST;
+  
+  scan_l = ad_read(1);
+  scan_r = ad_read(2);
 
-void control_proc(void){
-      scan_l = ad_read(1);
-      scan_r = ad_read(2);
+  if(scan_l<BLACK && scan_r<BLACK){r=STR;}
+  else(scan_l<BLACK && scan_r>=BLACK){r=LT;}
+  else(scan_l>=BLACK && scan_r<BLACK){r=RT;}
+  else{
+    r=RT2;
+    turn_flag=1;
+  }
 
+  PBDR=r;
 }
